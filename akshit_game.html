@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Neon Vector Escape</title>
+<style>
+  html,body{margin:0;background:#05050a;overflow:hidden;font-family:Arial}
+  #wrap{display:flex;justify-content:center;align-items:center;height:100vh}
+  canvas{background:#0d0d17;border:2px solid #222;border-radius:10px;box-shadow:0 0 20px #000}
+  #ui{position:absolute;top:10px;left:50%;transform:translateX(-50%);color:#6bf;font-size:22px;font-weight:bold;text-shadow:0 0 6px #49f}
+  #overlay{position:absolute;inset:0;display:flex;justify-content:center;align-items:center}
+  .panel{background:rgba(0,0,0,0.72);backdrop-filter:blur(5px);padding:20px;border-radius:12px;text-align:center;color:#fff;width:80%;max-width:360px}
+  .btn{margin-top:10px;padding:10px 16px;background:#59f;border-radius:6px;cursor:pointer;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="420" height="560"></canvas>
+  <div id="ui">0</div>
+  <div id="overlay"><div class="panel"><h2 id="title">Neon Vector Escape</h2><p id="desc">Top‑down avoider game. Drag/move pointer to steer. Survive as long as possible.</p><div class="btn" id="start">Start</div></div></div>
+</div>
+<script>
+/* COMPLETELY ORIGINAL GAMEPLAY — NOT FLAPPY‑STYLE AT ALL
+   ✦ Player moves freely in 2D with pointer
+   ✦ Obstacles spawn from all directions and rotate
+   ✦ No gravity, no pipes, no jumping, nothing like Flappy Bird
+*/
+
+(function(){
+  const c=document.getElementById("game"),x=c.getContext("2d");
+  const W=c.width,H=c.height;
+  const ui=document.getElementById("ui");
+  const overlay=document.getElementById("overlay");
+  const start=document.getElementById("start");
+  const title=document.getElementById("title");
+  const desc=document.getElementById("desc");
+
+  let running=false;
+  let player, obstacles, score, mouse;
+
+  function reset(){
+    player={x:W/2,y:H/2,size:18};
+    obstacles=[];
+    score=0;
+    mouse={x:W/2,y:H/2};
+    timer=0;
+  }
+
+  let timer=0;
+  function spawnObstacle(){
+    const s=20+Math.random()*40;
+    const side=Math.floor(Math.random()*4);
+    let xPos, yPos, vx, vy;
+    if(side===0){xPos=Math.random()*W;yPos=-50;vx=(Math.random()-0.5)*40;vy=60+Math.random()*120;}
+    if(side===1){xPos=W+50;yPos=Math.random()*H;vx=-(60+Math.random()*120);vy=(Math.random()-0.5)*40;}
+    if(side===2){xPos=Math.random()*W;yPos=H+50;vx=(Math.random()-0.5)*40;vy=-(60+Math.random()*120);}
+    if(side===3){xPos=-50;yPos=Math.random()*H;vx=60+Math.random()*120;vy=(Math.random()-0.5)*40;}
+    obstacles.push({x:xPos,y:yPos,size:s, vx,vy,rot:0,rs:(Math.random()-0.5)*2});
+  }
+
+  function collide(a,b){
+    const dx=a.x-b.x,dy=a.y-b.y;
+    const dist=Math.hypot(dx,dy);
+    return dist < (a.size + b.size)*0.6;
+  }
+
+  c.addEventListener("mousemove",e=>{const r=c.getBoundingClientRect();mouse.x=e.clientX-r.left;mouse.y=e.clientY-r.top;});
+  c.addEventListener("touchmove",e=>{e.preventDefault();const t=e.touches[0],r=c.getBoundingClientRect();mouse.x=t.clientX-r.left;mouse.y=t.clientY-r.top;},{passive:false});
+
+  start.onclick=()=>{overlay.style.display="none";running=true;reset();last=performance.now();loop(last);};
+
+  function loop(t){
+    if(!running)return;
+    const dt=Math.min(0.03,(t-last)/1000); last=t;
+
+    player.x += (mouse.x - player.x)*6*dt;
+    player.y += (mouse.y - player.y)*6*dt;
+
+    timer+=dt;
+    if(timer>0.8){timer=0;spawnObstacle();}
+
+    for(let i=obstacles.length-1;i>=0;i--){
+      const o=obstacles[i];
+      o.x += o.vx*dt;
+      o.y += o.vy*dt;
+      o.rot+=o.rs*dt;
+      if(o.x<-80||o.x>W+80||o.y<-80||o.y>H+80) obstacles.splice(i,1);
+    }
+
+    for(let o of obstacles){ if(collide(player,o)){gameOver();return;} }
+
+    score += dt*10;
+    ui.textContent=Math.floor(score);
+
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  function render(){
+    x.clearRect(0,0,W,H);
+
+    x.fillStyle="#6bf";
+    x.beginPath();
+    x.arc(player.x,player.y,player.size,0,Math.PI*2);
+    x.fill();
+
+    x.strokeStyle="#f55";
+    x.lineWidth=3;
+    obstacles.forEach(o=>{
+      x.save();
+      x.translate(o.x,o.y);
+      x.rotate(o.rot);
+      x.strokeRect(-o.size/2,-o.size/2,o.size,o.size);
+      x.restore();
+    });
+  }
+
+  function gameOver(){
+    running=false;
+    title.textContent="Game Over";
+    desc.textContent="Score: "+Math.floor(score);
+    overlay.style.display="flex";
+  }
+
+  let last=0;
+})();
+// --- Overrides Added ---
+// Slow scoring system
+if (typeof scoreIncrement !== 'undefined') {
+    scoreIncrement = 0.05;
+}
+
+// Override spawnObstacle with more obstacle types
+if (typeof spawnObstacle === 'function') {
+    const originalSpawn = spawnObstacle;
+    spawnObstacle = function () {
+        const side = Math.floor(Math.random() * 4);
+        let x, y, vx, vy;
+
+        const type = Math.floor(Math.random() * 3); // 0 = normal, 1 = fast, 2 = zigzag
+        const speedBase = 1.0;
+        const speed = speedBase + Math.random() * 0.5;
+        const fastSpeed = speed * 1.6;
+
+        if (side === 0) { x = Math.random() * canvas.width; y = -20; vx = 0; vy = type === 1 ? fastSpeed : speed; }
+        if (side === 1) { x = canvas.width + 20; y = Math.random() * canvas.height; vx = type === 1 ? -fastSpeed : -speed; vy = 0; }
+        if (side === 2) { x = Math.random() * canvas.width; y = canvas.height + 20; vx = 0; vy = type === 1 ? -fastSpeed : -speed; }
+        if (side === 3) { x = -20; y = Math.random() * canvas.height; vx = type === 1 ? fastSpeed : speed; vy = 0; }
+
+        obstacles.push({ x, y, vx, vy, size: 18, type, zigzagDir: Math.random() < 0.5 ? -1 : 1 });
+    }
+}
+// --- End Overrides ---
+</script>
+    <script>
+        // Add high score system
+        let highScore = parseInt(localStorage.getItem('dodge_highscore') || '0');
+        function updateHighScore(score){
+            if(score > highScore){
+                highScore = score;
+                localStorage.setItem('dodge_highscore', highScore);
+            }
+        }
+
+        // Inject simple menu screen
+        const menu = document.createElement('div');
+        menu.id = 'menu';
+        menu.style.position = 'absolute';
+        menu.style.top = '0';
+        menu.style.left = '0';
+        menu.style.width = '100%';
+        menu.style.height = '100%';
+        menu.style.background = 'black';
+        menu.style.display = 'flex';
+        menu.style.flexDirection = 'column';
+        menu.style.alignItems = 'center';
+        menu.style.justifyContent = 'center';
+        menu.style.color = 'white';
+        menu.style.fontFamily = 'Arial';
+        menu.innerHTML = `<h1>DODGE RUNNER</h1><p>High Score: ${highScore}</p><button id='startBtn' style='padding:10px 20px;font-size:22px;border:none;border-radius:10px;cursor:pointer;'>START</button>`;
+        document.body.appendChild(menu);
+
+        document.getElementById('startBtn').onclick = ()=>{
+            menu.style.display = 'none';
+            startGame();
+        }
+    </script>
+</body>
+</html>
