@@ -1,353 +1,190 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DODGY BOOM</title>
-
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dash Boom — Pixel Explosion</title>
 <style>
-  html,body{
-    margin:0;
-    background:#05050a;
-    overflow:hidden;
-    font-family:Arial, sans-serif;
-    user-select:none;
-  }
+body { margin:0; background:#111; font-family: pixel, monospace; overflow:hidden; }
+@font-face { font-family: pixel; src: local("Courier New"), local("monospace"); }
 
-  #wrap{
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    height:100vh;
-  }
+#menu, #gameOverMenu {
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    background: linear-gradient(#8acbff,#3b6ccc); color:white; font-size:50px; letter-spacing:3px; z-index:10; image-rendering: pixelated;
+}
 
-  canvas{
-    background:#0a0a14;
-    border:2px solid #222;
-    border-radius:12px;
-    box-shadow:0 0 20px #000;
-  }
+#playBtn, #restartBtn, #quitBtn {
+    margin-top: 20px; padding:15px 40px; font-size:45px; background:#1b4fbf; border:4px solid #fff; cursor:pointer; image-rendering: pixelated;
+}
 
-  .hud{
-    position:absolute;
-    color:#6bf;
-    font-size:22px;
-    font-weight:bold;
-    text-shadow:0 0 6px #49f;
-    z-index:10;
-  }
-
-  #score{ top:12px; left:20px; }
-  #high{ top:12px; right:20px; }
-
-  #pauseBtn{
-    bottom:12px;
-    right:20px;
-    font-size:18px;
-    padding:8px 14px;
-    background:#222;
-    color:#7df;
-    border-radius:8px;
-    box-shadow:0 0 6px #0af;
-    cursor:pointer;
-  }
-
-  /* ===== MENU ===== */
-  #menu{
-    position:absolute;
-    top:0; left:0;
-    width:100%; height:100%;
-    background:rgba(0,0,0,0.85);
-    display:flex;
-    flex-direction:column;
-    justify-content:center;
-    align-items:center;
-    text-align:center;
-    color:#7df;
-    z-index:20;
-  }
-
-  #menu h1{
-    font-size:40px;
-    text-shadow:0 0 12px #09f;
-    margin-bottom:20px;
-  }
-
-  #menu button{
-    margin:10px;
-    padding:12px 26px;
-    background:#111;
-    border:2px solid #09f;
-    color:#6bf;
-    font-size:22px;
-    border-radius:10px;
-    cursor:pointer;
-    box-shadow:0 0 10px #09f;
-  }
+canvas { background:#8acbff; image-rendering: pixelated; display:block; margin:auto; }
 </style>
 </head>
-
 <body>
-<div id="wrap">
-  <canvas id="game" width="420" height="560"></canvas>
-
-  <div id="score" class="hud">0</div>
-  <div id="high" class="hud">HIGH: 0</div>
-  <div id="pauseBtn" class="hud">⏸ Pause</div>
-
-  <div id="menu">
-    <h1>DODGY BOOM</h1>
+<div id="menu">
+    <div>DASH BOOM</div>
     <button id="playBtn">PLAY</button>
-    <button id="howBtn">HOW TO PLAY</button>
-  </div>
 </div>
 
+<div id="gameOverMenu" style="display:none;">
+    <div>GAME OVER</div>
+    <button id="restartBtn">RESTART</button>
+    <button id="quitBtn">QUIT</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
 <script>
-(function(){
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
-/* =====================================================
-   BASIC SETUP
-===================================================== */
-const c=document.getElementById("game");
-const x=c.getContext("2d");
-const W=c.width, H=c.height;
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-const scoreUI=document.getElementById("score");
-const highUI=document.getElementById("high");
-const pauseBtn=document.getElementById("pauseBtn");
+let gameRunning = false;
+let score = 0;
+let highScore = parseInt(localStorage.getItem("dashboom_highscore")||"0");
+let obstacles = [];
+let spawnInterval = null;
+let lastTime = 0;
 
-const menu=document.getElementById("menu");
-const playBtn=document.getElementById("playBtn");
-const howBtn=document.getElementById("howBtn");
+// ===== PLAYER =====
+const player = { x: canvas.width/2, y: canvas.height/2, size:50, speed:8 };
+let pointer = { x: player.x, y: player.y, active:false };
+let trail = [];
 
-let mouse={x:W/2,y:H/2};
-let running=false;
-let paused=false;
+canvas.addEventListener("touchstart", e => { pointer.active=true; let t=e.touches[0]; let r=canvas.getBoundingClientRect(); pointer.x=t.clientX-r.left; pointer.y=t.clientY-r.top; });
+canvas.addEventListener("touchmove", e => { let t=e.touches[0]; let r=canvas.getBoundingClientRect(); pointer.x=t.clientX-r.left; pointer.y=t.clientY-r.top; });
+canvas.addEventListener("touchend", ()=> pointer.active=false);
 
-let player, obstacles, timer, score;
-let highScore=parseInt(localStorage.getItem("dodgyboom_highscore")||"0");
-highUI.textContent="HIGH: "+highScore;
+// ===== PLAYER MOVEMENT & TRAIL =====
+function updatePlayer() {
+    if (!pointer.active) return;
+    let dx = pointer.x - player.x;
+    let dy = pointer.y - player.y;
+    player.x += dx * 0.15;
+    player.y += dy * 0.15;
+    player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+    player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
 
-/* =====================================================
-   RESET
-===================================================== */
-function reset(){
-  player={x:W/2, y:H/2, size:18};
-  obstacles=[];
-  timer=0;
-  score=0;
+    trail.push({x:player.x+player.size/2, y:player.y+player.size/2, alpha:1});
+    if (trail.length>20) trail.shift();
 }
 
-function saveHigh(){
-  if(score>highScore){
-    highScore=Math.floor(score);
-    localStorage.setItem("dodgyboom_highscore", highScore);
-    highUI.textContent="HIGH: "+highScore;
-  }
+function drawPlayer() {
+    for (let t of trail) {
+        ctx.fillStyle = `rgba(255,215,0,${t.alpha})`;
+        ctx.fillRect(t.x-25,t.y-25,player.size,player.size);
+        t.alpha-=0.05;
+    }
+    ctx.fillStyle="#ffd700";
+    ctx.fillRect(player.x,player.y,player.size,player.size);
+    ctx.fillStyle="#000";
+    ctx.fillRect(player.x+12,player.y+15,8,8);
+    ctx.fillRect(player.x+30,player.y+15,8,8);
+    ctx.fillRect(player.x+18,player.y+32,15,5);
 }
 
-/* =====================================================
-   INPUT
-===================================================== */
-c.addEventListener("mousemove", e=>{
-  let r=c.getBoundingClientRect();
-  mouse.x=e.clientX-r.left;
-  mouse.y=e.clientY-r.top;
-});
+// ===== OBSTACLES =====
+function spawnObstacle() {
+    if (obstacles.length >= 17) return;
+    let size = 30+Math.random()*20;
+    let speed = 2+Math.random()*4 + score/100;
+    let type = Math.random()<0.5?"normal":"zigzag";
+    const side = Math.floor(Math.random()*4);
+    let o = { w:size, h:size, vx:0, vy:0, type, t:0, dir: Math.random()<0.5?-1:1 };
+    if(side===0){ o.x=Math.random()*canvas.width; o.y=-size; o.vy=speed; }
+    else if(side===1){ o.x=Math.random()*canvas.width; o.y=canvas.height+size; o.vy=-speed; }
+    else if(side===2){ o.x=-size; o.y=Math.random()*canvas.height; o.vx=speed; }
+    else{ o.x=canvas.width+size; o.y=Math.random()*canvas.height; o.vx=-speed; }
+    obstacles.push(o);
+}
 
-c.addEventListener("touchmove", e=>{
-  e.preventDefault();
-  let t=e.touches[0], r=c.getBoundingClientRect();
-  mouse.x=t.clientX-r.left;
-  mouse.y=t.clientY-r.top;
-},{passive:false});
+function updateObstacles(dt) {
+    obstacles.forEach(o=>{
+        if(o.type==="zigzag"){
+            o.t+=dt*10;
+            if(o.vx===0) o.x+=Math.sin(o.t)*3;
+            else o.y+=Math.sin(o.t)*3;
+        }
+        o.x+=o.vx*dt*60;
+        o.y+=o.vy*dt*60;
+    });
+    obstacles = obstacles.filter(o => o.x<canvas.width+100 && o.x>-100 && o.y<canvas.height+100 && o.y>-100);
+}
 
-pauseBtn.onclick = ()=>{
-  paused=!paused;
-  pauseBtn.textContent = paused ? "▶ Resume" : "⏸ Pause";
+function drawObstacles() {
+    ctx.fillStyle="#444";
+    obstacles.forEach(o=>ctx.fillRect(o.x,o.y,o.w,o.h));
+}
+
+// ===== COLLISION =====
+function checkCollision() {
+    for(let o of obstacles){
+        if(player.x<o.x+o.w && player.x+player.size>o.x && player.y<o.y+o.h && player.y+player.size>o.y){
+            ctx.fillStyle="rgba(255,0,0,0.5)";
+            ctx.fillRect(0,0,canvas.width,canvas.height);
+            gameOver();
+        }
+    }
+}
+
+// ===== SCORE =====
+function drawScore() {
+    ctx.fillStyle="#000";
+    ctx.font="30px pixel";
+    ctx.fillText("Score: "+Math.floor(score),20,40);
+    ctx.fillText("Best: "+Math.floor(highScore),canvas.width-180,40);
+}
+
+// ===== GAME LOOP =====
+function gameLoop(t) {
+    if(!gameRunning) return;
+    let dt=(t-lastTime)/1000;
+    lastTime=t;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    updatePlayer();
+    updateObstacles(dt);
+    checkCollision();
+    drawObstacles();
+    drawPlayer();
+    drawScore();
+    score+=dt*10;
+    requestAnimationFrame(gameLoop);
+}
+
+// ===== GAME OVER =====
+function gameOver() {
+    gameRunning=false;
+    highScore=Math.max(highScore,score);
+    localStorage.setItem("dashboom_highscore",highScore);
+    document.getElementById("gameOverMenu").style.display="flex";
+    if(spawnInterval){ clearInterval(spawnInterval); spawnInterval=null; }
+}
+
+// ===== BUTTONS =====
+document.getElementById("playBtn").onclick = startGame;
+document.getElementById("restartBtn").onclick = startGame;
+document.getElementById("quitBtn").onclick = () => {
+    document.getElementById("gameOverMenu").style.display="none";
+    document.getElementById("menu").style.display="flex";
 };
 
-/* =====================================================
-   OBSTACLES
-===================================================== */
-function spawnObstacle(){
-  const s = 15 + Math.random()*40;
-  const type = Math.random() < 0.5 ? "square" : "diamond";
-
-  let o={
-    x:Math.random()*W,
-    y:-40,
-    size:s,
-    vy:80 + Math.random()*140,
-    rot:0,
-    rs:(Math.random()-0.5)*3,
-    type
-  };
-
-  // RANDOM SIDE ENTRY
-  let side = Math.floor(Math.random()*4);
-  if(side===0){ o.x=Math.random()*W; o.y=-60; o.vx=(Math.random()-0.5)*80; o.vy=120; }
-  if(side===1){ o.x=W+60; o.y=Math.random()*H; o.vx=-150; o.vy=(Math.random()-0.5)*50; }
-  if(side===2){ o.x=Math.random()*W; o.y=H+60; o.vx=(Math.random()-0.5)*80; o.vy=-150; }
-  if(side===3){ o.x=-60; o.y=Math.random()*H; o.vx=150; o.vy=(Math.random()-0.5)*50; }
-
-  obstacles.push(o);
-}
-
-/* =====================================================
-   COLLISION
-===================================================== */
-function collide(a,b){
-  const dx=a.x-b.x, dy=a.y-b.y;
-  return Math.hypot(dx,dy) < (a.size+b.size)*0.55;
-}
-
-/* =====================================================
-   GAME LOOP
-===================================================== */
-let last=0;
-function loop(t){
-  if(!running){ requestAnimationFrame(loop); return; }
-  if(paused){ requestAnimationFrame(loop); return; }
-
-  let dt=Math.min(0.03,(t-last)/1000); 
-  last=t;
-
-  // Player movement
-  player.x += (mouse.x - player.x)*5*dt;
-  player.y += (mouse.y - player.y)*5*dt;
-
-  timer += dt;
-  if(timer>0.7){
-    timer=0;
+function startGame(){
+    score=0;
+    obstacles=[];
+    player.x=canvas.width/2;
+    player.y=canvas.height/2;
+    trail.length=0;
+    document.getElementById("menu").style.display="none";
+    document.getElementById("gameOverMenu").style.display="none";
+    gameRunning=true;
+    lastTime=performance.now();
     spawnObstacle();
-  }
-
-  // Update obstacles
-  for(let i=obstacles.length-1;i>=0;i--){
-    let o=obstacles[i];
-    o.x += (o.vx||0)*dt;
-    o.y += (o.vy||0)*dt;
-    o.rot += o.rs*dt;
-
-    if(o.x<-100||o.x>W+100||o.y<-100||o.y>H+100){
-      obstacles.splice(i,1);
-      continue;
-    }
-
-    if(collide(player,o)){
-      running = false;
-      paused = true;
-      saveHigh();
-      showGameOver();
-      return;
-    }
-  }
-
-  score += dt*1.2;
-  scoreUI.textContent = Math.floor(score);
-
-  render();
-  requestAnimationFrame(loop);
+    spawnInterval=setInterval(spawnObstacle,800);
+    gameLoop(lastTime);
 }
-
-/* =====================================================
-   RENDER
-===================================================== */
-function render(){
-  x.clearRect(0,0,W,H);
-
-  // Player
-  x.fillStyle="#6bf";
-  x.beginPath();
-  x.arc(player.x,player.y,player.size,0,Math.PI*2);
-  x.fill();
-
-  // Obstacles
-  for(let o of obstacles){
-    x.save();
-    x.translate(o.x,o.y);
-    x.rotate(o.rot);
-    x.strokeStyle="#f55";
-    x.lineWidth=3;
-
-    if(o.type==="square"){
-      x.strokeRect(-o.size/2,-o.size/2,o.size,o.size);
-    } else {
-      x.beginPath();
-      x.moveTo(0,-o.size);
-      x.lineTo(o.size,0);
-      x.lineTo(0,o.size);
-      x.lineTo(-o.size,0);
-      x.closePath();
-      x.stroke();
-    }
-
-    x.restore();
-  }
-}
-
-/* =====================================================
-   GAME OVER SCREEN
-===================================================== */
-const gameOverScreen = document.createElement("div");
-gameOverScreen.style.position="absolute";
-gameOverScreen.style.top="0";
-gameOverScreen.style.left="0";
-gameOverScreen.style.width="100%";
-gameOverScreen.style.height="100%";
-gameOverScreen.style.background="rgba(0,0,0,0.85)";
-gameOverScreen.style.display="none";
-gameOverScreen.style.flexDirection="column";
-gameOverScreen.style.justifyContent="center";
-gameOverScreen.style.alignItems="center";
-gameOverScreen.style.color="#7df";
-gameOverScreen.style.zIndex="30";
-
-gameOverScreen.innerHTML=`
-  <h1 style="font-size:40px;text-shadow:0 0 12px #09f;">DODGY BOOM</h1>
-  <p id="finalScore" style="font-size:26px;margin:10px 0;"></p>
-  <button id="restartBtn"
-      style="margin-top:20px;padding:12px 28px;background:#111;
-      border:2px solid #09f;color:#6bf;font-size:22px;border-radius:10px;
-      cursor:pointer;box-shadow:0 0 10px #09f;">
-      RESTART
-  </button>
-`;
-
-document.body.appendChild(gameOverScreen);
-
-function showGameOver(){
-    document.getElementById("finalScore").textContent =
-        "Score: " + Math.floor(score);
-    gameOverScreen.style.display="flex";
-}
-
-document.getElementById("restartBtn").onclick = ()=>{
-    gameOverScreen.style.display="none";
-    reset();
-    paused=false;
-    running=true;
-    last = performance.now();
-    requestAnimationFrame(loop);
-};
-
-/* =====================================================
-   MENU
-===================================================== */
-playBtn.onclick = ()=>{
-  menu.style.display="none";
-  reset();
-  running=true;
-  last=performance.now();
-  loop(last);
-};
-
-howBtn.onclick = ()=>{
-  alert("Move your finger or mouse to dodge neon obstacles.\n\nSurvive as long as possible.\n\nGood luck!");
-};
-
-})();
 </script>
 </body>
 </html>
